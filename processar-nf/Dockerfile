@@ -5,4 +5,4 @@ COPY . .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-CMD ["functions-framework", "--target=process_nfe_xml", "--port=8080"]
+CMD ["python", "main.py"]
