@@ -5,6 +5,7 @@ steps:
       '-t', 'gcr.io/$PROJECT_ID/processa-nfe:$COMMIT_SHA',
       '.'
     ]
+    dir: processar-nf
 
   - name: 'gcr.io/cloud-builders/docker'
     args: [
