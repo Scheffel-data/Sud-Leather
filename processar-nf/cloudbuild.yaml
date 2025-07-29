@@ -6,7 +6,7 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'build',
-      '-t', 'southamerica-east1-docker.pkg.dev/$PROJECT_ID/processa-nfe/processa-nfe:$COMMIT_SHA',
+      '-t', '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_SERVICE_NAME/$_SERVICE_NAME:$COMMIT_SHA',
       '.'
     ]
     dir: processar-nf
@@ -14,21 +14,21 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'push',
-      'southamerica-east1-docker.pkg.dev/$PROJECT_ID/processa-nfe/processa-nfe:$COMMIT_SHA'
+      '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_SERVICE_NAME/$_SERVICE_NAME:$COMMIT_SHA'
     ]
 
-  - name: 'gcr.io/google-appengine/exec-wrapper'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
     args: [
-      '--',
-      'gcloud', 'run', 'deploy', 'processa-nfe',
-      '--image', 'southamerica-east1-docker.pkg.dev/$PROJECT_ID/processa-nfe/processa-nfe:$COMMIT_SHA',
-      '--region', 'southamerica-east1',
+      'run', 'deploy', '$_SERVICE_NAME',
+      '--image', '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_SERVICE_NAME/$_SERVICE_NAME:$COMMIT_SHA',
+      '--region', '$_LOCATION',
       '--platform', 'managed',
       '--allow-unauthenticated'
     ]
 
 images:
-  - 'southamerica-east1-docker.pkg.dev/$PROJECT_ID/processa-nfe/processa-nfe:$COMMIT_SHA'
+  - '$_LOCATION-docker.pkg.dev/$PROJECT_ID/$_SERVICE_NAME/$_SERVICE_NAME:$COMMIT_SHA'
 
 options:
   logging: CLOUD_LOGGING_ONLY
