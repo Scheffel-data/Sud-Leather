@@ -1,5 +1,4 @@
-functions-framework==3.*
-google-cloud-storage==2.*
-google-cloud-bigquery==3.*
-pandas==2.*
-lxml
+functions-framework
+google-cloud-storage
+google-cloud-bigquery
+pandas

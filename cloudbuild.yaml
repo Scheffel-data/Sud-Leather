@@ -1,0 +1,38 @@
+steps:
+# Passo 1: Constrói a imagem do contêiner a partir do seu código-fonte
+- name: 'gcr.io/k8s-skaffold/pack'
+  args:
+  - 'build'
+  - '$_GCR_HOSTNAME/$PROJECT_ID/$_SERVICE_NAME:$COMMIT_SHA'
+  - '--builder=gcr.io/buildpacks/builder:v1'
+  - '--path=.'
+  - '--entrypoint=process_nfe_xml' # <-- IMPORTANTE: MUDE AQUI para o nome da sua função
+
+# Passo 2: Envia a imagem criada para o registro de contêineres do Google
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+  - 'push'
+  - '$_GCR_HOSTNAME/$PROJECT_ID/$_SERVICE_NAME:$COMMIT_SHA'
+
+# Passo 3: Faz o deploy da nova imagem no seu serviço do Cloud Run
+- name: 'gcr.io/google-appengine/exec-wrapper'
+  args:
+  - '-i'
+  - '$_GCR_HOSTNAME/$PROJECT_ID/$_SERVICE_NAME:$COMMIT_SHA'
+  - '-s'
+  - '${_SERVICE_NAME}'
+  - '-l'
+  - '${_LOCATION}'
+  - '--'
+  - 'gcloud'
+  - 'run'
+  - 'services'
+  - 'update'
+  - '${_SERVICE_NAME}'
+  - '--image'
+  - '$_GCR_HOSTNAME/$PROJECT_ID/$_SERVICE_NAME:$COMMIT_SHA'
+  - '--region'
+  - '${_LOCATION}'
+
+images:
+- '$_GCR_HOSTNAME/$PROJECT_ID/$_SERVICE_NAME:$COMMIT_SHA'
