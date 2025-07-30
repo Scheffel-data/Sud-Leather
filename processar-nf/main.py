@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+import uuid
 import pandas as pd
 import xml.etree.ElementTree as ET
 from flask import Flask, request
@@ -116,13 +117,40 @@ def process_nfe_xml():
         # Cria o DataFrame
         df_nfe = criar_df_nfe(xml_content)
 
-        if df_nfe is not None and not df_nfe.empty:
-            rows_to_insert = df_nfe.to_dict(orient='records')
-            table_ref = bigquery_client.dataset(DATASET_ID).table(TABLE_ID)
-            errors = bigquery_client.insert_rows_json(table_ref, rows_to_insert)
+        if df_nfe is None or df_nfe.empty:
+            # Lógica para mover para uma pasta de erro de parsing, se desejado
+            print(f"⚠️ Nenhum dado extraído de {file_name}")
+            return "Sem dados válidos", 400
 
-            if not errors:
-                # Move para pasta "processados"
+        # --- NOVA LÓGICA DE MERGE ---
+        temp_table_id = f"temp_nfe_{uuid.uuid4().hex}"
+        temp_table_ref = bigquery_client.dataset(DATASET_ID).table(temp_table_id)
+
+        try:
+            # 1. Enviar DataFrame para uma tabela temporária no BigQuery
+            job_config = bigquery.LoadJobConfig(autodetect=True, write_disposition="WRITE_TRUNCATE")
+            bigquery_client.load_table_from_dataframe(df_nfe, temp_table_ref, job_config=job_config).result()
+            print(f"Dados carregados na tabela temporária: {temp_table_id}")
+
+            # 2. Construir e executar a query MERGE
+            merge_query = f"""
+                MERGE `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}` AS T
+                USING `{PROJECT_ID}.{DATASET_ID}.{temp_table_id}` AS S
+                ON T.numero_nf = S.numero_nf AND T.Descricao = S.Descricao
+                WHEN NOT MATCHED THEN
+                  INSERT (numero_nf, data_emissao, emitente, CNPJ, Descricao, Quantidade_pcs, Quantidade_kg, valor_unitario, valor_total_produto)
+                  VALUES(S.numero_nf, S.data_emissao, S.emitente, S.CNPJ, S.Descricao, S.Quantidade_pcs, S.Quantidade_kg, S.valor_unitario, S.valor_total_produto)
+            """
+            merge_job = bigquery_client.query(merge_query)
+            merge_job.result()  # Espera a query terminar
+
+            if merge_job.errors:
+                print(f"❌ Erros ao executar MERGE: {merge_job.errors}")
+                # Aqui você pode mover o arquivo para uma pasta de erro de MERGE
+                return "Erro ao executar MERGE", 500
+            else:
+                print(f"✅ MERGE concluído com sucesso para o arquivo {file_name}.")
+                # Move o arquivo para "processados" após o sucesso
                 now = datetime.now()
                 destination_folder = f"processados/{now.year:04d}/{now.month:02d}"
                 new_path = f"{destination_folder}/{file_name.split('/')[-1]}"
@@ -130,12 +158,11 @@ def process_nfe_xml():
                 blob.delete()
                 print(f"✅ Processado e movido para: {new_path}")
                 return f"Processado: {file_name}", 200
-            else:
-                print(f"❌ Erros ao inserir no BigQuery: {errors}")
-                return "Erro ao inserir no BigQuery", 500
-        else:
-            print(f"⚠️ Nenhum dado extraído de {file_name}")
-            return "Sem dados válidos", 400
+
+        finally:
+            # 3. Apagar a tabela temporária, aconteça o que acontecer
+            bigquery_client.delete_table(temp_table_ref, not_found_ok=True)
+            print(f"Tabela temporária {temp_table_id} apagada.")
 
     except Exception as e:
         print(f"🔥 Erro crítico: {str(e)}")
