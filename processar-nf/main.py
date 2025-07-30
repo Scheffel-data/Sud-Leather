@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from flask import Flask, request
 from google.cloud import storage
 from google.cloud import bigquery
+import json
 
 # --- Configurações do BigQuery ---
 PROJECT_ID = "sud-leather"
@@ -17,6 +18,8 @@ storage_client = storage.Client()
 bigquery_client = bigquery.Client(project=PROJECT_ID)
 
 app = Flask(__name__)
+
+from datetime import datetime  # já está importado
 
 def criar_df_nfe(xml_content):
     try:
@@ -33,20 +36,15 @@ def criar_df_nfe(xml_content):
         data_emissao_str = data_emissao_element.text if data_emissao_element is not None else None
 
         data_emissao_formatada = None
-        # CÓDIGO CORRIGIDO
         if data_emissao_str:
             try:
-                date_obj = None 
                 if 'T' in data_emissao_str:
                     date_str_sem_fuso = data_emissao_str.split('T')[0]
-                    date_obj = datetime.strptime(date_str_sem_fuso, '%Y-%m-%d').date()
+                    data_emissao_formatada = datetime.strptime(date_str_sem_fuso, '%Y-%m-%d').date()
                 else:
-                    date_obj = datetime.strptime(data_emissao_str, '%Y-%m-%d').date()
-
-                if date_obj:
-                    data_emissao_formatada = date_obj.isoformat() # Converte para string "AAAA-MM-DD"
+                    data_emissao_formatada = datetime.strptime(data_emissao_str, '%Y-%m-%d').date()
             except ValueError:
-                data_emissao_formatada = data_emissao_str
+                data_emissao_formatada = None  # ou data_emissao_str, se quiser manter como string em fallback
 
         emitente_nome = infNFe.find('.//nfe:emit/nfe:xNome', namespaces).text if infNFe.find('.//nfe:emit/nfe:xNome', namespaces) is not None else None
         emitente_cnpj = infNFe.find('.//nfe:emit/nfe:CNPJ', namespaces).text if infNFe.find('.//nfe:emit/nfe:CNPJ', namespaces) is not None else None
@@ -63,7 +61,7 @@ def criar_df_nfe(xml_content):
 
             produto = {
                 'numero_nf': numero_nf,
-                'data_emissao': data_emissao_formatada,
+                'data_emissao': data_emissao_formatada,  # <-- agora é do tipo date
                 'emitente': emitente_nome,
                 'CNPJ': emitente_cnpj,
                 'Descricao': descricao,
@@ -81,7 +79,6 @@ def criar_df_nfe(xml_content):
         print(f"Erro ao processar XML: {e}")
         return None
 
-import json
 
 
 @app.route("/", methods=["POST"])
