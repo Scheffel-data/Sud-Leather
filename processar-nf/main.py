@@ -78,30 +78,38 @@ def criar_df_nfe(xml_content):
 
 import json
 
+
 @app.route("/", methods=["POST"])
 def process_nfe_xml():
-    data = request.get_json()
-    print("📦 Payload recebido:", json.dumps(data, indent=2))
-
-    message = data.get("message", {})
-    attributes = message.get("attributes", {})
-
-    bucket_name = attributes.get("bucketId")
-    file_name = attributes.get("objectId")
-
-    if not bucket_name or not file_name:
-        print("⚠️ Payload inválido ou incompleto.")
-        return "Erro: bucketId ou objectId não encontrado no payload", 400
-
-    if not file_name.lower().endswith('.xml') or not file_name.startswith('recebidas/'):
-        print(f"📂 Ignorado: {file_name}")
-        return f"Ignorado: {file_name}", 200
-
-
     try:
+        data = request.get_json(silent=True)
+        print("📥 Payload recebido:", json.dumps(data, indent=2))
+
+        if not data or "message" not in data:
+            print("❌ Erro: JSON malformado ou sem campo 'message'.")
+            return "Requisição inválida", 400
+
+        message = data["message"]
+        attributes = message.get("attributes", {})
+        bucket_name = attributes.get("bucketId")
+        file_name = attributes.get("objectId")
+
+        if not bucket_name or not file_name:
+            print("⚠️ Payload incompleto. bucketId ou objectId ausente.")
+            return "Campos obrigatórios ausentes", 400
+
+        if not file_name.lower().endswith(".xml") or not file_name.startswith("recebidas/"):
+            print(f"📁 Arquivo ignorado: {file_name}")
+            return f"Ignorado: {file_name}", 200
+
+        print(f"📂 Processando arquivo: {file_name} do bucket: {bucket_name}")
+
+        # Baixa conteúdo XML
         bucket = storage_client.bucket(bucket_name)
         blob = bucket.blob(file_name)
         xml_content = blob.download_as_text()
+
+        # Cria o DataFrame
         df_nfe = criar_df_nfe(xml_content)
 
         if df_nfe is not None and not df_nfe.empty:
@@ -109,21 +117,25 @@ def process_nfe_xml():
             table_ref = bigquery_client.dataset(DATASET_ID).table(TABLE_ID)
             errors = bigquery_client.insert_rows_json(table_ref, rows_to_insert)
 
-            if errors == []:
-                destination_folder = f"processados/{datetime.now().year:04d}/{datetime.now().month:02d}"
-                base_file_name = file_name.split('/')[-1]
-                new_file_path = f"{destination_folder}/{base_file_name}"
-                new_blob = bucket.blob(new_file_path)
-                blob.rewrite(new_blob)
+            if not errors:
+                # Move para pasta "processados"
+                now = datetime.now()
+                destination_folder = f"processados/{now.year:04d}/{now.month:02d}"
+                new_path = f"{destination_folder}/{file_name.split('/')[-1]}"
+                blob.copy_to(bucket.blob(new_path))
                 blob.delete()
-                return f"Processado e movido para {new_file_path}", 200
+                print(f"✅ Processado e movido para: {new_path}")
+                return f"Processado: {file_name}", 200
             else:
-                return f"Erros ao inserir no BigQuery: {errors}", 500
+                print(f"❌ Erros ao inserir no BigQuery: {errors}")
+                return "Erro ao inserir no BigQuery", 500
         else:
-            return f"Nenhum dado extraído de {file_name}", 400
+            print(f"⚠️ Nenhum dado extraído de {file_name}")
+            return "Sem dados válidos", 400
 
     except Exception as e:
-        return f"Erro crítico ao processar {file_name}: {e}", 500
+        print(f"🔥 Erro crítico: {str(e)}")
+        return f"Erro interno: {str(e)}", 500
 
 @app.route("/", methods=["GET"])
 def health_check():
