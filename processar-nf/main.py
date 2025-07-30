@@ -32,14 +32,18 @@ def criar_df_nfe(xml_content):
         data_emissao_str = data_emissao_element.text if data_emissao_element is not None else None
 
         data_emissao_formatada = None
+        # CÓDIGO CORRIGIDO
         if data_emissao_str:
             try:
-                if 'T' in data_emissao_str and ('+' in data_emissao_str or '-' == data_emissao_str[-6]):
-                    data_emissao_formatada = datetime.fromisoformat(data_emissao_str).date()
-                elif 'T' in data_emissao_str:
-                    data_emissao_formatada = datetime.strptime(data_emissao_str.split('T')[0], '%Y-%m-%d').date()
+                date_obj = None 
+                if 'T' in data_emissao_str:
+                    date_str_sem_fuso = data_emissao_str.split('T')[0]
+                    date_obj = datetime.strptime(date_str_sem_fuso, '%Y-%m-%d').date()
                 else:
-                    data_emissao_formatada = datetime.strptime(data_emissao_str, '%Y-%m-%d').date()
+                    date_obj = datetime.strptime(data_emissao_str, '%Y-%m-%d').date()
+
+                if date_obj:
+                    data_emissao_formatada = date_obj.isoformat() # Converte para string "AAAA-MM-DD"
             except ValueError:
                 data_emissao_formatada = data_emissao_str
 
