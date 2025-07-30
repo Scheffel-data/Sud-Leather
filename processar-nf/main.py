@@ -79,11 +79,20 @@ def criar_df_nfe(xml_content):
 @app.route("/", methods=["POST"])
 def process_nfe_xml():
     data = request.get_json()
-    bucket_name = data.get("bucket")
-    file_name = data.get("name")
+
+    # Novo: Extrai os atributos de Pub/Sub
+    message = data.get("message", {})
+    attributes = message.get("attributes", {})
+    
+    bucket_name = attributes.get("bucketId")
+    file_name = attributes.get("objectId")
+
+    if not bucket_name or not file_name:
+        return "Erro: bucketId ou objectId não encontrado no payload", 400
 
     if not file_name.lower().endswith('.xml') or not file_name.startswith('recebidas/'):
         return f"Ignorado: {file_name} não é XML ou não está na pasta 'recebidas'", 200
+
 
     try:
         bucket = storage_client.bucket(bucket_name)
