@@ -1,3 +1,11 @@
+import os
+from datetime import datetime
+import pandas as pd
+import xml.etree.ElementTree as ET
+from flask import Flask, request
+from google.cloud import storage
+from google.cloud import bigquery
+
 # --- Configurações do BigQuery ---
 PROJECT_ID = "sud-leather"
 DATASET_ID = "Data_base"
@@ -103,6 +111,10 @@ def process_nfe_xml():
 
     except Exception as e:
         return f"Erro crítico ao processar {file_name}: {e}", 500
+
+@app.route("/", methods=["GET"])
+def health_check():
+    return "OK", 200
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
