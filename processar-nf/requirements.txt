@@ -1,5 +1,6 @@
 flask
 pandas
+pyarrow
 google-cloud-storage
 google-cloud-bigquery
 functions-framework
