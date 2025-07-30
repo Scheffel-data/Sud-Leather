@@ -126,7 +126,7 @@ def process_nfe_xml():
                 now = datetime.now()
                 destination_folder = f"processados/{now.year:04d}/{now.month:02d}"
                 new_path = f"{destination_folder}/{file_name.split('/')[-1]}"
-                blob.copy_to(bucket.blob(new_path))
+                bucket.copy_blob(blob, bucket, new_path)
                 blob.delete()
                 print(f"✅ Processado e movido para: {new_path}")
                 return f"Processado: {file_name}", 200
