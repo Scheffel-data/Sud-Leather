@@ -11,7 +11,7 @@ import json
 # --- Configurações do BigQuery ---
 PROJECT_ID = "sud-leather"
 # ATUALIZAÇÃO: Nome do dataset alterado para seguir as boas práticas.
-DATASET_ID = "RAW_DATA" 
+DATASET_ID = "RAW_DATA"
 TABLE_ID = "Frigorifico_Nota_Fiscal"
 
 # Inicializa os clientes do Cloud Storage e BigQuery
@@ -48,15 +48,12 @@ def criar_df_nfe(xml_content):
         # --- Extração dos itens da NFe ---
         lista_produtos = []
         for det in infNFe.findall('.//nfe:det', namespaces):
-            # MELHORIA: Extrai o número do item ('nItem'), que é crucial para uma chave única.
-            nItem = det.get('nItem')
-            
+            # Lógica simplificada sem 'nItem'
             produto = {
                 'numero_nf': int(numero_nf),
                 'data_emissao': data_emissao_formatada,
                 'emitente': emitente_nome,
                 'CNPJ': emitente_cnpj,
-                'nItem': int(nItem), # Adiciona o número do item
                 'Descricao': det.find('.//nfe:prod/nfe:xProd', namespaces).text,
                 'Quantidade_pcs': quantidade_pecas,
                 'Quantidade_kg': float(det.find('.//nfe:prod/nfe:qCom', namespaces).text or '0'),
@@ -113,15 +110,15 @@ def process_nfe_xml():
             bigquery_client.load_table_from_dataframe(df_nfe, temp_table_ref, job_config=job_config).result()
             print(f"Dados carregados na tabela temporária: {temp_table_id}")
 
-            # 2. Construir e executar a query MERGE com a chave correta
-            # CORREÇÃO CRÍTICA: A chave do MERGE agora usa (CNPJ, numero_nf, nItem) para garantir unicidade.
+            # 2. Construir e executar a query MERGE com a chave composta
+            # ALTERAÇÃO: A chave do MERGE agora usa (CNPJ, numero_nf, Descricao).
             merge_query = f"""
                 MERGE `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}` AS T
                 USING `{PROJECT_ID}.{DATASET_ID}.{temp_table_id}` AS S
-                ON T.CNPJ = S.CNPJ AND T.numero_nf = S.numero_nf AND T.nItem = S.nItem
+                ON T.CNPJ = S.CNPJ AND T.numero_nf = S.numero_nf AND T.Descricao = S.Descricao
                 WHEN NOT MATCHED THEN
-                  INSERT (numero_nf, data_emissao, emitente, CNPJ, nItem, Descricao, Quantidade_pcs, Quantidade_kg, valor_unitario, valor_total_produto)
-                  VALUES(S.numero_nf, S.data_emissao, S.emitente, S.CNPJ, S.nItem, S.Descricao, S.Quantidade_pcs, S.Quantidade_kg, S.valor_unitario, S.valor_total_produto);
+                  INSERT (numero_nf, data_emissao, emitente, CNPJ, Descricao, Quantidade_pcs, Quantidade_kg, valor_unitario, valor_total_produto)
+                  VALUES(S.numero_nf, S.data_emissao, S.emitente, S.CNPJ, S.Descricao, S.Quantidade_pcs, S.Quantidade_kg, S.valor_unitario, S.valor_total_produto);
             """
             
             print("Executando query MERGE...")
@@ -155,4 +152,3 @@ if __name__ == "__main__":
     # Esta parte é para testes locais e não é usada na Cloud Function
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
-
