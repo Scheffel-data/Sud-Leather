@@ -84,23 +84,28 @@ def mover_blob_para(bucket, blob, pasta_destino):
 @app.route("/", methods=["POST"])
 def process_nfe_xml():
     """
-    Função principal, acionada por um evento, agora com filtro de pasta no código.
+    Função principal, agora adaptada para o formato de payload do Eventarc (CloudEvents).
     """
-    data = request.get_json(silent=True)
-    if not data or "message" not in data:
-        print("Requisição inválida, sem payload 'message'.")
+    # O Eventarc envia um payload JSON que representa um CloudEvent.
+    event = request.get_json(silent=True)
+    if not event:
+        print("Requisição inválida, sem payload JSON.")
         return "Requisição inválida", 400
 
-    message = data["message"]
-    attributes = message.get("attributes", {})
-    bucket_name = attributes.get("bucketId")
-    file_name = attributes.get("objectId")
+    # Os dados específicos do evento (como nome do bucket e arquivo) estão no campo 'data'.
+    data = event.get('data', {})
+    bucket_name = data.get('bucket')
+    file_name = data.get('name') # No CloudEvents, o caminho do arquivo está em 'name'.
 
-    # --- MELHORIA FINAL: Filtro de pasta implementado no código ---
+    # --- Filtro de pasta implementado diretamente no código ---
     if not file_name or not file_name.startswith('recebidas/'):
         print(f"📁 Arquivo ignorado (fora da pasta 'recebidas/'): {file_name}")
-        # Retorna 200 para confirmar o recebimento e não tentar novamente.
         return "Arquivo ignorado (fora da pasta de interesse)", 200
+    
+    # Validação para garantir que temos as informações necessárias do evento
+    if not bucket_name:
+        print(f"❌ Erro no payload do evento: 'bucket' não encontrado.")
+        return "Payload do evento inválido", 400
 
     print(f"📂 Processando arquivo: {file_name} do bucket: {bucket_name}")
     bucket = storage_client.bucket(bucket_name)
