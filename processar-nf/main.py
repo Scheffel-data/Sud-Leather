@@ -97,10 +97,10 @@ def process_nfe_xml():
     bucket_name = data.get('bucket')
     file_name = data.get('name') # No CloudEvents, o caminho do arquivo está em 'name'.
 
-    # --- Filtro de pasta implementado diretamente no código ---
-    if not file_name or not file_name.startswith('recebidas/'):
+        # --- Filtro de pasta implementado diretamente no código ---
+    if not file_name or 'recebidas/' not in file_name:
         print(f"📁 Arquivo ignorado (fora da pasta 'recebidas/'): {file_name}")
-        return "Arquivo ignorado (fora da pasta de interesse)", 200
+        return "Arquivo ignorado", 200
     
     # Validação para garantir que temos as informações necessárias do evento
     if not bucket_name:
