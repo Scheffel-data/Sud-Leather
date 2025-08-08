@@ -93,9 +93,11 @@ def criar_df_nfe(xml_content):
                 continue # Pula para o próximo item se a tag <prod> não existir
 
             produto = {
-                'numero_nf': int(numero_nf),
+                # --- CORREÇÃO: numero_nf como STRING ---
+                'numero_nf': numero_nf,
                 'data_emissao': data_emissao_formatada,
                 'emitente': emitente_nome,
+                # --- CORREÇÃO: CNPJ como STRING (o tipo numérico foi removido mais abaixo) ---
                 'CNPJ': emitente_cnpj,
                 'Descricao': get_element_text(prod_element, 'nfe:xProd', namespaces, ''),
                 'Quantidade_pcs': quantidade_pecas,
@@ -143,14 +145,11 @@ def process_nfe_xml():
         print("❌ Requisição inválida, sem payload JSON.")
         return "Requisição inválida", 400
 
-    # Log para depuração: imprime todo o evento recebido
     print(f"📦 Evento recebido: {json.dumps(event)}")
 
-    # --- CORREÇÃO: Lendo os dados do nível principal do evento ---
     bucket_name = event.get('bucket')
     file_name = event.get('name')
 
-    # --- Filtro de pasta implementado diretamente no código ---
     if not file_name or 'recebidas/' not in file_name:
         print(f"📁 Arquivo ignorado (não está na pasta 'recebidas/'): {file_name}")
         return "Arquivo ignorado", 200
@@ -175,6 +174,8 @@ def process_nfe_xml():
         print(f"⚠️ Nenhum dado extraído de {file_name}. Movendo para a pasta de erros.")
         mover_blob_para(bucket, blob, "erros")
         return "Arquivo com dados inválidos ou vazios", 200
+
+    # --- CORREÇÃO: Bloco de conversão do CNPJ para número foi REMOVIDO para corresponder ao esquema STRING ---
 
     temp_table_id = f"temp_nfe_{uuid.uuid4().hex}"
     temp_table_ref = bigquery_client.dataset(DATASET_ID).table(temp_table_id)
