@@ -22,9 +22,11 @@ app = Flask(__name__)
 
 def get_element_text(element, path, namespaces, default=None):
     """
-    Função auxiliar para encontrar um sub-elemento e retornar seu texto.
+    Função auxiliar para encontrar um sub-elemento e retornar o seu texto.
     Retorna um valor padrão se o elemento não for encontrado.
     """
+    if element is None:
+        return default
     found_element = element.find(path, namespaces)
     if found_element is not None and found_element.text is not None:
         return found_element.text.strip()
@@ -48,21 +50,35 @@ def criar_df_nfe(xml_content):
         emit_element = infNFe.find('nfe:emit', namespaces)
         transp_element = infNFe.find('nfe:transp', namespaces)
 
-        if ide_element is None or emit_element is None:
-            print("❌ Tags essenciais <ide> ou <emit> não encontradas.")
+        if ide_element is None:
+            print("❌ Tag essencial <ide> não encontrada.")
+            return None
+        if emit_element is None:
+            print("❌ Tag essencial <emit> não encontrada.")
             return None
 
+        # Validação campo a campo para logs mais claros
         numero_nf = get_element_text(ide_element, 'nfe:nNF', namespaces)
-        data_emissao_str = get_element_text(ide_element, 'nfe:dhEmi', namespaces) or get_element_text(ide_element, 'nfe:dEmi', namespaces)
-        emitente_nome = get_element_text(emit_element, 'nfe:xNome', namespaces)
-        emitente_cnpj = get_element_text(emit_element, 'nfe:CNPJ', namespaces)
-        
-        # Validação de campos essenciais
-        if not all([numero_nf, data_emissao_str, emitente_nome, emitente_cnpj]):
-            print(f"❌ XML inválido. Faltam dados essenciais no cabeçalho. NF: {numero_nf}, CNPJ: {emitente_cnpj}")
+        if not numero_nf:
+            print("❌ Campo obrigatório não encontrado no XML: nNF (Número da Nota Fiscal)")
             return None
 
-        qvol_text = get_element_text(transp_element, 'nfe:vol/nfe:qVol', namespaces, '0') if transp_element else '0'
+        data_emissao_str = get_element_text(ide_element, 'nfe:dhEmi', namespaces) or get_element_text(ide_element, 'nfe:dEmi', namespaces)
+        if not data_emissao_str:
+            print("❌ Campo obrigatório não encontrado no XML: dhEmi ou dEmi (Data de Emissão)")
+            return None
+            
+        emitente_nome = get_element_text(emit_element, 'nfe:xNome', namespaces)
+        if not emitente_nome:
+            print("❌ Campo obrigatório não encontrado no XML: xNome (Nome do Emitente)")
+            return None
+
+        emitente_cnpj = get_element_text(emit_element, 'nfe:CNPJ', namespaces)
+        if not emitente_cnpj:
+            print("❌ Campo obrigatório não encontrado no XML: CNPJ (CNPJ do Emitente)")
+            return None
+
+        qvol_text = get_element_text(transp_element, 'nfe:vol/nfe:qVol', namespaces, '0')
         quantidade_pecas = int(float(qvol_text))
 
         # Formata a data de emissão
@@ -95,6 +111,9 @@ def criar_df_nfe(xml_content):
 
         return pd.DataFrame(lista_produtos)
 
+    except ET.ParseError as e:
+        print(f"❌ Erro de parsing no XML. O ficheiro pode estar malformado: {e}")
+        return None
     except Exception as e:
         print(f"❌ Erro inesperado ao processar o conteúdo do XML: {e}")
         return None
