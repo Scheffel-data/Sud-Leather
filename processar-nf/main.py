@@ -20,9 +20,19 @@ bigquery_client = bigquery.Client(project=PROJECT_ID)
 
 app = Flask(__name__)
 
+def get_element_text(element, path, namespaces, default=None):
+    """
+    Função auxiliar para encontrar um sub-elemento e retornar seu texto.
+    Retorna um valor padrão se o elemento não for encontrado.
+    """
+    found_element = element.find(path, namespaces)
+    if found_element is not None and found_element.text is not None:
+        return found_element.text.strip()
+    return default
+
 def criar_df_nfe(xml_content):
     """
-    Processa o conteúdo de um XML de NFe e retorna um DataFrame do Pandas com os dados dos produtos.
+    Processa o conteúdo de um XML de NFe de forma robusta e retorna um DataFrame.
     """
     try:
         namespaces = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
@@ -33,14 +43,28 @@ def criar_df_nfe(xml_content):
             print("❌ Tag <infNFe> não encontrada no XML.")
             return None
 
-        # --- Extração de dados do cabeçalho da NFe ---
-        numero_nf = infNFe.find('.//nfe:ide/nfe:nNF', namespaces).text
-        data_emissao_str = (infNFe.find('.//nfe:ide/nfe:dhEmi', namespaces) or infNFe.find('.//nfe:ide/nfe:dEmi', namespaces)).text
-        emitente_nome = infNFe.find('.//nfe:emit/nfe:xNome', namespaces).text
-        emitente_cnpj = infNFe.find('.//nfe:emit/nfe:CNPJ', namespaces).text
-        qvol_element = infNFe.find('.//nfe:transp/nfe:vol/nfe:qVol', namespaces)
-        quantidade_pecas = int(float(qvol_element.text)) if qvol_element is not None and qvol_element.text else 0
+        # --- Extração de dados do cabeçalho da NFe (de forma segura) ---
+        ide_element = infNFe.find('nfe:ide', namespaces)
+        emit_element = infNFe.find('nfe:emit', namespaces)
+        transp_element = infNFe.find('nfe:transp', namespaces)
+
+        if ide_element is None or emit_element is None:
+            print("❌ Tags essenciais <ide> ou <emit> não encontradas.")
+            return None
+
+        numero_nf = get_element_text(ide_element, 'nfe:nNF', namespaces)
+        data_emissao_str = get_element_text(ide_element, 'nfe:dhEmi', namespaces) or get_element_text(ide_element, 'nfe:dEmi', namespaces)
+        emitente_nome = get_element_text(emit_element, 'nfe:xNome', namespaces)
+        emitente_cnpj = get_element_text(emit_element, 'nfe:CNPJ', namespaces)
         
+        # Validação de campos essenciais
+        if not all([numero_nf, data_emissao_str, emitente_nome, emitente_cnpj]):
+            print(f"❌ XML inválido. Faltam dados essenciais no cabeçalho. NF: {numero_nf}, CNPJ: {emitente_cnpj}")
+            return None
+
+        qvol_text = get_element_text(transp_element, 'nfe:vol/nfe:qVol', namespaces, '0') if transp_element else '0'
+        quantidade_pecas = int(float(qvol_text))
+
         # Formata a data de emissão
         date_str_sem_fuso = data_emissao_str.split('T')[0]
         data_emissao_formatada = datetime.strptime(date_str_sem_fuso, '%Y-%m-%d').date()
@@ -48,23 +72,31 @@ def criar_df_nfe(xml_content):
         # --- Extração dos itens da NFe ---
         lista_produtos = []
         for det in infNFe.findall('.//nfe:det', namespaces):
+            prod_element = det.find('nfe:prod', namespaces)
+            if prod_element is None:
+                continue # Pula para o próximo item se a tag <prod> não existir
+
             produto = {
                 'numero_nf': int(numero_nf),
                 'data_emissao': data_emissao_formatada,
                 'emitente': emitente_nome,
                 'CNPJ': emitente_cnpj,
-                'Descricao': det.find('.//nfe:prod/nfe:xProd', namespaces).text,
+                'Descricao': get_element_text(prod_element, 'nfe:xProd', namespaces, ''),
                 'Quantidade_pcs': quantidade_pecas,
-                'Quantidade_kg': float(det.find('.//nfe:prod/nfe:qCom', namespaces).text or '0'),
-                'valor_unitario': float(det.find('.//nfe:prod/nfe:vUnCom', namespaces).text or '0'),
-                'valor_total_produto': float(det.find('.//nfe:prod/nfe:vProd', namespaces).text or '0')
+                'Quantidade_kg': float(get_element_text(prod_element, 'nfe:qCom', namespaces, '0')),
+                'valor_unitario': float(get_element_text(prod_element, 'nfe:vUnCom', namespaces, '0')),
+                'valor_total_produto': float(get_element_text(prod_element, 'nfe:vProd', namespaces, '0'))
             }
             lista_produtos.append(produto)
+        
+        if not lista_produtos:
+            print("⚠️ Nenhum item (<det>) encontrado na NFe.")
+            return None
 
         return pd.DataFrame(lista_produtos)
 
     except Exception as e:
-        print(f"❌ Erro ao processar o conteúdo do XML: {e}")
+        print(f"❌ Erro inesperado ao processar o conteúdo do XML: {e}")
         return None
 
 def mover_blob_para(bucket, blob, pasta_destino):
@@ -96,7 +128,6 @@ def process_nfe_xml():
     print(f"📦 Evento recebido: {json.dumps(event)}")
 
     # --- CORREÇÃO: Lendo os dados do nível principal do evento ---
-    # Para eventos do Cloud Storage, 'bucket' e 'name' são atributos de nível superior.
     bucket_name = event.get('bucket')
     file_name = event.get('name')
 
@@ -105,7 +136,6 @@ def process_nfe_xml():
         print(f"📁 Arquivo ignorado (não está na pasta 'recebidas/'): {file_name}")
         return "Arquivo ignorado", 200
     
-    # Validação para garantir que temos as informações necessárias do evento
     if not bucket_name:
         print(f"❌ Erro no payload do evento: 'bucket' não encontrado.")
         return "Payload do evento inválido", 400
