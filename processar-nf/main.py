@@ -80,13 +80,11 @@ def mover_blob_para(bucket, blob, pasta_destino):
         print(f"✅ Arquivo movido para: {new_path}")
     except Exception as e:
         print(f"🔥 Falha crítica ao mover o arquivo {blob.name} para {pasta_destino}. Erro: {e}")
-        # Se falhar ao mover, o arquivo original permanece para nova tentativa.
-
 
 @app.route("/", methods=["POST"])
 def process_nfe_xml():
     """
-    Função principal, acionada por um evento, agora robusta contra loops.
+    Função principal, acionada por um evento, agora com filtro de pasta no código.
     """
     data = request.get_json(silent=True)
     if not data or "message" not in data:
@@ -98,37 +96,29 @@ def process_nfe_xml():
     bucket_name = attributes.get("bucketId")
     file_name = attributes.get("objectId")
 
-    if not bucket_name or not file_name or not file_name.lower().endswith(".xml"):
-        print(f"📁 Arquivo ignorado (não é XML ou payload inválido): {file_name}")
-        # Retorna 200 para não tentar novamente um arquivo que não é de interesse.
-        return "Arquivo ignorado", 200
+    # --- MELHORIA FINAL: Filtro de pasta implementado no código ---
+    if not file_name or not file_name.startswith('recebidas/'):
+        print(f"📁 Arquivo ignorado (fora da pasta 'recebidas/'): {file_name}")
+        # Retorna 200 para confirmar o recebimento e não tentar novamente.
+        return "Arquivo ignorado (fora da pasta de interesse)", 200
 
     print(f"📂 Processando arquivo: {file_name} do bucket: {bucket_name}")
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(file_name)
 
     try:
-        # --- MELHORIA 1: Tratamento de arquivo não encontrado ---
-        # Tenta baixar o conteúdo do arquivo. Se não existir, causa uma exceção.
         xml_content = blob.download_as_text()
-
     except exceptions.NotFound:
-        # Se o arquivo não for encontrado (erro 404), registramos o problema
-        # e retornamos 200 OK para quebrar o loop de uma "mensagem fantasma".
         print(f"❌ Erro 404: Arquivo {file_name} não encontrado no bucket. Mensagem descartada.")
         return "Arquivo não encontrado, mensagem descartada", 200
 
-    # Processa o conteúdo do XML para criar o DataFrame
     df_nfe = criar_df_nfe(xml_content)
 
-    # --- MELHORIA 2: Tratamento de XML inválido ou vazio ---
     if df_nfe is None or df_nfe.empty:
         print(f"⚠️ Nenhum dado extraído de {file_name}. Movendo para a pasta de erros.")
         mover_blob_para(bucket, blob, "erros")
-        # Retorna 200 OK para quebrar o loop após mover o arquivo inválido.
         return "Arquivo com dados inválidos ou vazios", 200
 
-    # --- LÓGICA DE MERGE (mantida como estava) ---
     temp_table_id = f"temp_nfe_{uuid.uuid4().hex}"
     temp_table_ref = bigquery_client.dataset(DATASET_ID).table(temp_table_id)
 
@@ -146,28 +136,26 @@ def process_nfe_xml():
               VALUES(S.numero_nf, S.data_emissao, S.emitente, S.CNPJ, S.Descricao, S.Quantidade_pcs, S.Quantidade_kg, S.valor_unitario, S.valor_total_produto);
         """
         
-        print("Executando query MERGE...")
         merge_job = bigquery_client.query(merge_query)
         merge_job.result()
 
         if merge_job.errors:
             print(f"❌ Erros ao executar MERGE: {merge_job.errors}")
             mover_blob_para(bucket, blob, "erros")
-            return "Erro ao executar MERGE", 200 # Retorna 200 para evitar loop
         else:
             print(f"✅ MERGE concluído com sucesso para o arquivo {file_name}.")
             mover_blob_para(bucket, blob, "processados")
-            return f"Processado: {file_name}", 200
+        
+        return "Processamento finalizado", 200
 
     except Exception as e:
         print(f"🔥 Erro crítico durante o processo de BigQuery: {str(e)}")
         mover_blob_para(bucket, blob, "erros")
-        return f"Erro interno no BigQuery: {str(e)}", 200 # Retorna 200 para evitar loop
+        return f"Erro interno no BigQuery: {str(e)}", 200
 
     finally:
         bigquery_client.delete_table(temp_table_ref, not_found_ok=True)
         print(f"Tabela temporária {temp_table_id} apagada.")
-
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8080))
