@@ -7,6 +7,7 @@ from flask import Flask, request
 from google.cloud import storage
 from google.cloud import bigquery
 from google.api_core import exceptions
+import json
 
 # --- Configurações do BigQuery ---
 PROJECT_ID = "sud-leather"
@@ -29,7 +30,7 @@ def criar_df_nfe(xml_content):
         infNFe = root.find('.//nfe:infNFe', namespaces)
 
         if infNFe is None:
-            print("Tag <infNFe> não encontrada no XML.")
+            print("❌ Tag <infNFe> não encontrada no XML.")
             return None
 
         # --- Extração de dados do cabeçalho da NFe ---
@@ -86,20 +87,22 @@ def process_nfe_xml():
     """
     Função principal, agora adaptada para o formato de payload do Eventarc (CloudEvents).
     """
-    # O Eventarc envia um payload JSON que representa um CloudEvent.
     event = request.get_json(silent=True)
     if not event:
-        print("Requisição inválida, sem payload JSON.")
+        print("❌ Requisição inválida, sem payload JSON.")
         return "Requisição inválida", 400
 
-    # Os dados específicos do evento (como nome do bucket e arquivo) estão no campo 'data'.
-    data = event.get('data', {})
-    bucket_name = data.get('bucket')
-    file_name = data.get('name') # No CloudEvents, o caminho do arquivo está em 'name'.
+    # Log para depuração: imprime todo o evento recebido
+    print(f"📦 Evento recebido: {json.dumps(event)}")
 
-        # --- Filtro de pasta implementado diretamente no código ---
+    # --- CORREÇÃO: Lendo os dados do nível principal do evento ---
+    # Para eventos do Cloud Storage, 'bucket' e 'name' são atributos de nível superior.
+    bucket_name = event.get('bucket')
+    file_name = event.get('name')
+
+    # --- Filtro de pasta implementado diretamente no código ---
     if not file_name or 'recebidas/' not in file_name:
-        print(f"📁 Arquivo ignorado (fora da pasta 'recebidas/'): {file_name}")
+        print(f"📁 Arquivo ignorado (não está na pasta 'recebidas/'): {file_name}")
         return "Arquivo ignorado", 200
     
     # Validação para garantir que temos as informações necessárias do evento
@@ -107,7 +110,7 @@ def process_nfe_xml():
         print(f"❌ Erro no payload do evento: 'bucket' não encontrado.")
         return "Payload do evento inválido", 400
 
-    print(f"📂 Processando arquivo: {file_name} do bucket: {bucket_name}")
+    print(f"🚀 Processando arquivo: {file_name} do bucket: {bucket_name}")
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(file_name)
 
@@ -130,7 +133,7 @@ def process_nfe_xml():
     try:
         job_config = bigquery.LoadJobConfig(autodetect=True, write_disposition="WRITE_TRUNCATE")
         bigquery_client.load_table_from_dataframe(df_nfe, temp_table_ref, job_config=job_config).result()
-        print(f"Dados carregados na tabela temporária: {temp_table_id}")
+        print(f"💾 Dados carregados na tabela temporária: {temp_table_id}")
 
         merge_query = f"""
             MERGE `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}` AS T
@@ -160,7 +163,7 @@ def process_nfe_xml():
 
     finally:
         bigquery_client.delete_table(temp_table_ref, not_found_ok=True)
-        print(f"Tabela temporária {temp_table_id} apagada.")
+        print(f"🗑️ Tabela temporária {temp_table_id} apagada.")
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8080))
